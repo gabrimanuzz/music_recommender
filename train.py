@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.preprocessing import load_and_clean, scale_features
 from src.model import build_model, save_model
+from src.config import load_weights
 
 
 def train(csv_path: str):
@@ -32,13 +33,22 @@ def train(csv_path: str):
     df = load_and_clean(csv_path)
 
     # ── Step 2: Normalizzazione delle feature ──────
-    print("\n[2/3] Normalizzazione delle feature audio...")
-    X_scaled, scaler = scale_features(df)
+    print("\n[2/3] Normalizzazione e pesatura delle feature...")
+    weights = load_weights("model")
+    print(f"[INFO] Pesi attivi: group_weight={weights['group_weight']}")
+    X_scaled, scaler, group_columns = scale_features(
+        df,
+        feature_weights=weights["feature_weights"],
+        group_weight=weights["group_weight"],
+    )
 
     # ── Step 3: Addestramento e salvataggio ────────
     print("\n[3/3] Addestramento del modello KNN...")
     model = build_model(X_scaled, n_neighbors=11, metric="cosine")
-    save_model(model, scaler, df, output_dir="model")
+    save_model(model, scaler, df, group_columns,
+               feature_weights=weights["feature_weights"],
+               group_weight=weights["group_weight"],
+               output_dir="model")
 
     print("\n✅ Training completato! Ora puoi avviare l'app con: python main.py")
 

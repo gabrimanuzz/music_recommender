@@ -32,6 +32,91 @@ AUDIO_FEATURES = [
 ]
 
 
+# ─────────────────────────────────────────────
+# Pesi delle feature audio (calibrazione percettiva)
+# ─────────────────────────────────────────────
+# Non tutte le feature sono ugualmente importanti per la "somiglianza"
+# percepita tra due brani. Ad esempio liveness è spesso rumore (Spotify
+# la stima male) mentre energy/valence definiscono il mood del brano.
+# Dopo StandardScaler, moltiplichiamo ciascuna colonna per il suo peso.
+FEATURE_WEIGHTS = {
+    "danceability":     1.4,   # definisce il "groove" e il flow
+    "energy":           1.5,   # driver primario del mood
+    "valence":          1.4,   # asse emotivo (positivo vs malinconico)
+    "acousticness":     1.3,   # distingue acustico da elettronico
+    "instrumentalness": 1.0,   # utile ma rumorosa
+    "tempo":            1.0,   # già correlata con energy/danceability
+    "loudness":         0.7,   # più indicatore di mastering che di stile
+    "speechiness":      0.6,   # utile solo per separare rap/parlato
+    "liveness":         0.5,   # quasi sempre rumore di registrazione
+}
+
+
+# ─────────────────────────────────────────────
+# Macrogruppi di genere
+# ─────────────────────────────────────────────
+# Il dataset Kaggle ha 114 generi distinti: molti sono varianti dello
+# stesso "mondo" (es. deep-house, progressive-house, electro). Li
+# raggruppiamo in 14 macrogruppi musicali. Il macrogruppo entra come
+# feature one-hot nel KNN: brani dello stesso macrogruppo saranno
+# automaticamente più vicini nello spazio vettoriale.
+GENRE_GROUPS = {
+    "pop":          ["pop", "power-pop", "synth-pop", "indie-pop", "pop-film",
+                     "indie", "alternative", "emo", "romance", "british",
+                     "swedish", "french", "german", "spanish"],
+    "rock":         ["rock", "alt-rock", "hard-rock", "punk-rock", "psych-rock",
+                     "grunge", "rock-n-roll", "rockabilly", "punk", "garage",
+                     "goth", "industrial", "hardcore"],
+    "metal":        ["metal", "heavy-metal", "death-metal", "black-metal",
+                     "metalcore", "grindcore"],
+    "electronic":   ["edm", "electronic", "electro", "techno", "house",
+                     "deep-house", "chicago-house", "detroit-techno",
+                     "minimal-techno", "progressive-house", "dubstep", "trance",
+                     "hardstyle", "drum-and-bass", "breakbeat", "idm",
+                     "trip-hop", "club", "dance", "j-dance", "disco",
+                     "groove"],   # tag caotico, lo trattiamo come dance
+    "hiphop":       ["hip-hop"],
+    "rnb_soul":     ["soul"],   # nel dataset solo 'soul' è r&b americano pulito
+    "jazz_blues":   ["jazz", "blues"],
+    "folk_country": ["folk", "acoustic", "singer-songwriter", "songwriter",
+                     "country", "bluegrass", "honky-tonk", "guitar"],
+    "classical":    ["classical", "opera", "piano", "new-age", "ambient"],
+    "latin":        ["latin", "latino", "reggaeton", "salsa", "samba", "tango",
+                     "mpb", "brazil", "forro", "pagode", "sertanejo",
+                     # I tag seguenti nel dataset Kaggle contengono in
+                     # maggioranza musica brasiliana/latina, non occidentale:
+                     "funk",     # funk carioca brasiliano
+                     "gospel",   # gospel evangelico brasiliano
+                     "r-n-b"],   # mix brasiliano/latino dominante
+    "reggae_carib": ["reggae", "ska", "dancehall", "dub"],
+    "asian":        ["j-pop", "k-pop", "anime", "j-rock", "j-idol", "cantopop",
+                     "mandopop", "indian", "iranian", "turkish", "malay"],
+    "world_other":  ["afrobeat", "world-music"],
+    "mood_func":    ["chill", "sleep", "study", "happy", "sad", "party",
+                     "kids", "children", "disney", "show-tunes", "comedy"],
+}
+
+# Lista ordinata dei macrogruppi (l'ordine fissa le colonne del one-hot).
+ALL_GROUPS = sorted(GENRE_GROUPS.keys()) + ["other"]
+
+# Peso del one-hot del macrogruppo: forte ma non dominante.
+# Un mismatch di macrogruppo aggiunge ~√2 · GROUP_WEIGHT di distanza,
+# paragonabile a ~2 deviazioni standard sulle feature audio pesate.
+GROUP_WEIGHT = 2.5
+
+
+def genre_to_group(genre: str) -> str:
+    """
+    Mappa un genere Spotify nel suo macrogruppo.
+    Ritorna 'other' se il genere non è riconosciuto.
+    """
+    g = str(genre).lower().strip()
+    for group, genres in GENRE_GROUPS.items():
+        if g in genres:
+            return group
+    return "other"
+
+
 def load_and_clean(csv_path: str) -> pd.DataFrame:
     """
     Carica il CSV e rimuove righe inutilizzabili.
@@ -64,62 +149,64 @@ def load_and_clean(csv_path: str) -> pd.DataFrame:
     # Seconda deduplicazione: per (track_name, artists).
     # Necessaria perché lo stesso brano può avere track_id diversi
     # se è presente in edizioni diverse (Deluxe, Remaster, ecc.).
-    # Senza questo step, cercare "Blinding Lights" restituisce
-    # 5 copie quasi identiche come primi risultati KNN.
-    # str.lower() normalizza maiuscole prima del confronto.
     df["_name_lower"] = df["track_name"].str.lower().str.strip()
     df["_artist_lower"] = df["artists"].str.lower().str.strip()
     df = df.drop_duplicates(subset=["_name_lower", "_artist_lower"])
-    df = df.drop(columns=["_name_lower", "_artist_lower"])  # colonne temporanee
+    df = df.drop(columns=["_name_lower", "_artist_lower"])
 
-    # Resettiamo l'indice del DataFrame dopo aver rimosso righe.
-    # Senza reset, gli indici avrebbero "buchi" (es. 0, 2, 5, 7...)
-    # che possono causare problemi con KNN.
     df = df.reset_index(drop=True)
 
     print(f"[INFO] Righe dopo pulizia: {len(df)}")
     return df
 
 
-def scale_features(df: pd.DataFrame):
+def scale_features(df: pd.DataFrame, feature_weights: dict = None,
+                   group_weight: float = None):
     """
-    Normalizza le feature audio con StandardScaler.
+    Costruisce la matrice delle feature finale per il KNN:
+    1. Normalizza le 9 feature audio con StandardScaler.
+    2. Moltiplica ogni colonna per il suo peso (FEATURE_WEIGHTS).
+    3. Aggiunge un one-hot del macrogruppo di genere, pesato GROUP_WEIGHT.
 
-    Perché normalizzare?
-    --------------------
-    Le feature hanno scale molto diverse:
-      - danceability va da 0 a 1
-      - tempo va da 50 a 250 BPM
-    Senza normalizzazione, KNN darebbe peso enorme al tempo
-    solo perché i suoi valori numerici sono più grandi.
-    StandardScaler trasforma ogni colonna in modo che abbia
-    media = 0 e deviazione standard = 1, rendendo tutte le
-    feature ugualmente influenti nel calcolo della distanza.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame pulito contenente le colonne AUDIO_FEATURES.
+    Se feature_weights o group_weight sono None, usa i default del modulo.
+    Questo permette alla GUI (tab Pesi) di passare pesi personalizzati.
 
     Returns
     -------
-    X_scaled : np.ndarray
-        Matrice numpy con le feature normalizzate.
+    X_final : np.ndarray
+        Matrice (n_canzoni, 9 + n_macrogruppi).
     scaler : StandardScaler
-        L'oggetto scaler addestrato (serve per trasformare
-        nuove canzoni prima di interrogare il modello).
+        Lo scaler addestrato.
+    group_columns : list[str]
+        Lista ordinata dei macrogruppi (= colonne del one-hot).
     """
+    if feature_weights is None:
+        feature_weights = FEATURE_WEIGHTS
+    if group_weight is None:
+        group_weight = GROUP_WEIGHT
 
-    # Estraiamo solo le colonne audio come matrice numpy.
-    # .values converte il DataFrame in un array numpy 2D
-    # di forma (n_canzoni, n_feature).
+    # ── Step 1: scaling delle feature audio ────────────────
     X = df[AUDIO_FEATURES].values
-
-    # Creiamo lo scaler e lo "addestriamo" sui nostri dati:
-    # fit() calcola la media e la deviazione standard di ogni colonna.
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    # fit_transform è equivalente a scaler.fit(X) + scaler.transform(X)
 
-    print(f"[INFO] Feature scalate: {X_scaled.shape}")  # (n_righe, 9)
-    return X_scaled, scaler
+    # ── Step 2: applicazione dei pesi colonna per colonna ──
+    weights = np.array([feature_weights[f] for f in AUDIO_FEATURES])
+    X_weighted = X_scaled * weights
+
+    # ── Step 3: one-hot del macrogruppo di genere ──────────
+    groups = df["track_genre"].apply(genre_to_group)
+    group_to_idx = {g: i for i, g in enumerate(ALL_GROUPS)}
+
+    X_onehot = np.zeros((len(df), len(ALL_GROUPS)), dtype=float)
+    for row_idx, g in enumerate(groups):
+        X_onehot[row_idx, group_to_idx[g]] = 1.0
+
+    X_onehot_weighted = X_onehot * group_weight
+
+    # ── Step 4: concatenazione orizzontale ─────────────────
+    X_final = np.hstack([X_weighted, X_onehot_weighted])
+
+    print(f"[INFO] Feature scalate: {X_final.shape}  "
+          f"(9 audio + {len(ALL_GROUPS)} macrogruppi)")
+    return X_final, scaler, ALL_GROUPS

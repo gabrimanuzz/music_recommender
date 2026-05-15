@@ -67,9 +67,11 @@ def build_model(X_scaled: np.ndarray, n_neighbors: int = 11, metric: str = "cosi
     return model
 
 
-def save_model(model, scaler, df, output_dir: str = "model"):
+def save_model(model, scaler, df, group_columns,
+               feature_weights=None, group_weight=None,
+               output_dir: str = "model"):
     """
-    Salva il modello, lo scaler e il DataFrame su disco con pickle.
+    Salva il modello, lo scaler, il DataFrame e la lista dei macrogruppi.
 
     Pickle serializza oggetti Python in file binari (.pkl).
     Questo ci permette di caricare il modello già addestrato
@@ -83,42 +85,66 @@ def save_model(model, scaler, df, output_dir: str = "model"):
         Lo scaler addestrato (necessario per normalizzare le query).
     df : pd.DataFrame
         Il DataFrame pulito (serve per recuperare titolo/artista dai risultati).
+    group_columns : list[str]
+        Lista ordinata dei macrogruppi: serve a recommender.py per ricostruire
+        il one-hot del genere quando trasforma una nuova query.
     output_dir : str
         Cartella dove salvare i file.
     """
 
-    os.makedirs(output_dir, exist_ok=True)  # crea la cartella se non esiste
+    os.makedirs(output_dir, exist_ok=True)
 
     with open(f"{output_dir}/knn_model.pkl", "wb") as f:
-        pickle.dump(model, f)   # "wb" = write binary
+        pickle.dump(model, f)
 
     with open(f"{output_dir}/scaler.pkl", "wb") as f:
         pickle.dump(scaler, f)
 
-    # Salviamo il DataFrame come pickle (più veloce di riscrivere il CSV)
+    with open(f"{output_dir}/group_columns.pkl", "wb") as f:
+        pickle.dump(group_columns, f)
+
     df.to_pickle(f"{output_dir}/songs_df.pkl")
+
+    # Salviamo anche i pesi usati al training, così il recommender
+    # userà sempre quelli (single source of truth per le inferenze).
+    if feature_weights is not None and group_weight is not None:
+        from src.config import save_weights
+        save_weights(feature_weights, group_weight, model_dir=output_dir)
 
     print(f"[INFO] Modello salvato in '{output_dir}/'")
 
 
 def load_model(model_dir: str = "model"):
     """
-    Carica modello, scaler e DataFrame dal disco.
+    Carica modello, scaler, DataFrame, lista macrogruppi e pesi attivi.
 
     Returns
     -------
-    model, scaler, df : tuple
-        I tre oggetti necessari per fare raccomandazioni.
+    model, scaler, df, group_columns, weights : tuple
+        weights è un dict {"feature_weights": {...}, "group_weight": float}
     """
     import pandas as pd
+    from src.config import load_weights
 
     with open(f"{model_dir}/knn_model.pkl", "rb") as f:
-        model = pickle.load(f)   # "rb" = read binary
+        model = pickle.load(f)
 
     with open(f"{model_dir}/scaler.pkl", "rb") as f:
         scaler = pickle.load(f)
 
+    group_columns_path = f"{model_dir}/group_columns.pkl"
+    if not os.path.exists(group_columns_path):
+        raise FileNotFoundError(
+            "Modello obsoleto: manca 'group_columns.pkl'. "
+            "Riesegui 'python train.py' per rigenerare il modello."
+        )
+    with open(group_columns_path, "rb") as f:
+        group_columns = pickle.load(f)
+
     df = pd.read_pickle(f"{model_dir}/songs_df.pkl")
 
+    # I pesi del training (usati per costruire i vettori di query)
+    weights = load_weights(model_dir)
+
     print("[INFO] Modello caricato dal disco")
-    return model, scaler, df
+    return model, scaler, df, group_columns, weights
