@@ -1,0 +1,3 @@
+# Questo file vuoto dice a Python che la cartella src/ è un "package",
+# cioè una collezione di moduli importabili con la sintassi:
+# from src.preprocessing import ...
