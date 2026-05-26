@@ -1,27 +1,10 @@
-"""
-main.py
--------
-Applicazione grafica principale del Music Recommender.
-
-Struttura a tab:
-  ┌─────────────────────────────────────────┐
-  │  🎵  Music Recommender                  │
-  ├─────────────────────────────────────────┤
-  │  [Recommender] [Visualizzazione] [Pesi] │
-  ├─────────────────────────────────────────┤
-  │                                         │
-  │   (contenuto del tab attivo)            │
-  │                                         │
-  └─────────────────────────────────────────┘
-"""
-
 import os
 import subprocess
 import sys
 import customtkinter as ctk
 import numpy as np
 
-# matplotlib embed in tkinter
+# matplotlib embedded in tkinter
 import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.figure import Figure
@@ -40,7 +23,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
-# Palette colori per i macrogruppi (matplotlib tab20)
+# palette colori per i macrogruppi (matplotlib tab20)
 GROUP_COLORS = {
     "pop":          "#1f77b4",
     "rock":         "#d62728",
@@ -70,15 +53,12 @@ class MusicRecommenderApp(ctk.CTk):
         self.minsize(900, 600)
 
         self.selected_song_index = None
-        # PCA pre-calcolata: la calcoliamo lazy al primo accesso al tab
+        # PCA calcolata lazy al primo accesso al tab
         self._pca_data = None
 
         self._load_model_safe()
         self._build_ui()
 
-    # ─────────────────────────────────────────────
-    #  MODELLO
-    # ─────────────────────────────────────────────
     def _load_model_safe(self):
         try:
             (self.model, self.scaler, self.df,
@@ -88,20 +68,16 @@ class MusicRecommenderApp(ctk.CTk):
             self.model_loaded = False
 
     def _reload_model(self):
-        """Ricarica il modello dopo un retrain. Invalida la PCA cached."""
+        # invalida la PCA cached dopo un retrain
         self._load_model_safe()
         self._pca_data = None
         if hasattr(self, "status_var"):
             self.status_var.set(f"Modello ricaricato — {len(self.df):,} brani.")
 
-    # ─────────────────────────────────────────────
-    #  UI ROOT
-    # ─────────────────────────────────────────────
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        # Titolo
         header = ctk.CTkFrame(self, corner_radius=0, height=60)
         header.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(
@@ -113,7 +89,6 @@ class MusicRecommenderApp(ctk.CTk):
             self._build_error_panel()
             return
 
-        # Tabview
         self.tabs = ctk.CTkTabview(self, corner_radius=8)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 0))
         self.tabs.add("Recommender")
@@ -124,10 +99,9 @@ class MusicRecommenderApp(ctk.CTk):
         self._build_tab_visualization(self.tabs.tab("Visualizzazione"))
         self._build_tab_weights(self.tabs.tab("Pesi"))
 
-        # Quando l'utente cambia tab, lazy-init di visualization
+        # lazy-init della visualization al primo cambio tab
         self.tabs.configure(command=self._on_tab_changed)
 
-        # Status bar
         self.status_var = ctk.StringVar(
             value=f"Dataset: {len(self.df):,} brani caricati"
         )
@@ -162,14 +136,12 @@ class MusicRecommenderApp(ctk.CTk):
         if tab == "Visualizzazione" and self._pca_data is None:
             self._compute_pca_and_draw()
 
-    # ═════════════════════════════════════════════
-    #  TAB 1: RECOMMENDER
-    # ═════════════════════════════════════════════
+    # tab 1: recommender
     def _build_tab_recommender(self, parent):
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(1, weight=1)
 
-        # Barra di ricerca
+        # barra di ricerca
         search_bar = ctk.CTkFrame(parent, fg_color="transparent")
         search_bar.grid(row=0, column=0, sticky="ew", padx=5, pady=(8, 10))
         search_bar.grid_columnconfigure(0, weight=1)
@@ -188,7 +160,7 @@ class MusicRecommenderApp(ctk.CTk):
             font=ctk.CTkFont(size=14), command=self._on_search,
         ).grid(row=0, column=1)
 
-        # Pannello a due colonne
+        # due colonne: risultati ricerca + raccomandazioni
         main = ctk.CTkFrame(parent, fg_color="transparent")
         main.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         main.grid_columnconfigure(0, weight=1)
@@ -288,7 +260,7 @@ class MusicRecommenderApp(ctk.CTk):
                 self.group_columns, self.weights, n_recommendations=10,
             )
             self._display_recommendations(recs, df_index)
-            # Se la PCA è già pronta, aggiorna l'evidenziazione
+            # se la PCA è già pronta, aggiorna l'evidenziazione
             if self._pca_data is not None:
                 self._draw_pca(highlight_index=df_index, highlight_recs=recs)
         except Exception as e:
@@ -335,14 +307,11 @@ class MusicRecommenderApp(ctk.CTk):
             font=ctk.CTkFont(size=14), text_color="gray",
         ).pack(expand=True, pady=80)
 
-    # ═════════════════════════════════════════════
-    #  TAB 2: VISUALIZZAZIONE
-    # ═════════════════════════════════════════════
+    # tab 2: visualizzazione
     def _build_tab_visualization(self, parent):
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(1, weight=1)
 
-        # Toolbar in cima
         toolbar = ctk.CTkFrame(parent, fg_color="transparent")
         toolbar.grid(row=0, column=0, sticky="ew", padx=5, pady=(8, 8))
 
@@ -357,14 +326,13 @@ class MusicRecommenderApp(ctk.CTk):
             command=self._on_show_selected,
         ).pack(side="right", padx=5)
 
-        # Frame per i grafici
         self.viz_frame = ctk.CTkFrame(parent, fg_color="transparent")
         self.viz_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         self.viz_frame.grid_columnconfigure(0, weight=3)
         self.viz_frame.grid_columnconfigure(1, weight=1)
         self.viz_frame.grid_rowconfigure(0, weight=1)
 
-        # Placeholder iniziale
+        # placeholder finché l'utente non apre la tab
         self._viz_placeholder = ctk.CTkLabel(
             self.viz_frame,
             text="Apri questa tab per calcolare la proiezione PCA\n(operazione una tantum, ~2 secondi).",
@@ -373,7 +341,7 @@ class MusicRecommenderApp(ctk.CTk):
         self._viz_placeholder.grid(row=0, column=0, columnspan=2, pady=60)
 
     def _compute_pca_and_draw(self):
-        """Calcola PCA al primo accesso al tab e disegna entrambi i grafici."""
+        # calcola PCA al primo accesso e disegna entrambi i grafici
         self.status_var.set("Calcolo PCA in corso...")
         self.update_idletasks()
 
@@ -391,17 +359,16 @@ class MusicRecommenderApp(ctk.CTk):
             "pca": pca,
         }
 
-        # Rimuovi il placeholder
         self._viz_placeholder.destroy()
 
-        # Setup figure scatter
+        # figura scatter
         self.scatter_fig = Figure(figsize=(7, 5), dpi=100, facecolor="#1a1a1a")
         self.scatter_ax = self.scatter_fig.add_subplot(111)
         self.scatter_canvas = FigureCanvasTkAgg(self.scatter_fig, master=self.viz_frame)
         self.scatter_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew",
                                                  padx=(0, 5))
 
-        # Setup figure bar chart
+        # figura bar chart
         self.bar_fig = Figure(figsize=(3.5, 5), dpi=100, facecolor="#1a1a1a")
         self.bar_ax = self.bar_fig.add_subplot(111)
         self.bar_canvas = FigureCanvasTkAgg(self.bar_fig, master=self.viz_frame)
@@ -421,14 +388,14 @@ class MusicRecommenderApp(ctk.CTk):
         coords = self._pca_data["coords"]
         groups = self._pca_data["groups"]
 
-        # Scatter colorato per macrogruppo
+        # scatter colorato per macrogruppo
         for g in sorted(set(groups)):
             mask = groups == g
             ax.scatter(coords[mask, 0], coords[mask, 1],
                        c=GROUP_COLORS.get(g, "#888"),
                        s=8, alpha=0.55, label=g, edgecolors="none")
 
-        # Highlight del brano selezionato + vicini
+        # highlight del brano selezionato + vicini
         if highlight_index is not None:
             try:
                 xy = project_point(
@@ -463,7 +430,7 @@ class MusicRecommenderApp(ctk.CTk):
         for spine in ax.spines.values():
             spine.set_color("#444")
         ax.legend(loc="upper right", fontsize=7, framealpha=0.7,
-                  facecolor="#222", edgecolor="#444", labelcolor="white",
+                  facecolor="#222", edgecolor="white", labelcolor="white",
                   ncol=2)
         self.scatter_fig.tight_layout()
         self.scatter_canvas.draw_idle()
@@ -492,7 +459,6 @@ class MusicRecommenderApp(ctk.CTk):
         return genre_to_group(genre)
 
     def _on_show_selected(self):
-        """Bottone 'Mostra brano selezionato': evidenzia nel grafico."""
         if self._pca_data is None:
             self.status_var.set("Apri prima il tab per calcolare la PCA.")
             return
@@ -510,9 +476,7 @@ class MusicRecommenderApp(ctk.CTk):
         except Exception as e:
             self.status_var.set(f"Errore: {e}")
 
-    # ═════════════════════════════════════════════
-    #  TAB 3: PESI
-    # ═════════════════════════════════════════════
+    # tab 3: pesi
     def _build_tab_weights(self, parent):
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(0, weight=1)
@@ -521,7 +485,6 @@ class MusicRecommenderApp(ctk.CTk):
         outer.grid(row=0, column=0, sticky="nsew", padx=10, pady=8)
         outer.grid_columnconfigure(0, weight=1)
 
-        # Intestazione
         ctk.CTkLabel(
             outer, text="Pesi delle feature",
             font=ctk.CTkFont(size=18, weight="bold"),
@@ -534,7 +497,6 @@ class MusicRecommenderApp(ctk.CTk):
             justify="left",
         ).grid(row=1, column=0, sticky="w", pady=(0, 14))
 
-        # Slider per le feature audio
         self.weight_sliders = {}
         self.weight_value_labels = {}
 
@@ -559,7 +521,7 @@ class MusicRecommenderApp(ctk.CTk):
             )
             row_idx += 1
 
-        # Separatore + group weight
+        # separatore + group weight
         sep = ctk.CTkFrame(outer, height=1, fg_color="#444")
         sep.grid(row=row_idx, column=0, sticky="ew", pady=(16, 12))
         row_idx += 1
@@ -589,7 +551,6 @@ class MusicRecommenderApp(ctk.CTk):
         )
         row_idx += 1
 
-        # Bottoni
         btn_row = ctk.CTkFrame(outer, fg_color="transparent")
         btn_row.grid(row=row_idx, column=0, sticky="ew", pady=(20, 8))
 
@@ -607,7 +568,7 @@ class MusicRecommenderApp(ctk.CTk):
 
     def _add_weight_slider(self, parent, row_idx, label, desc, current,
                            vmin, vmax, display_label=None):
-        """Crea una riga con etichetta + slider + valore numerico."""
+        # riga con etichetta + slider + valore numerico
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid(row=row_idx, column=0, sticky="ew", pady=4)
         frame.grid_columnconfigure(1, weight=1)
@@ -668,8 +629,7 @@ class MusicRecommenderApp(ctk.CTk):
         self.status_var.set("Pesi salvati. Avvio del retraining...")
         self.update_idletasks()
 
-        # Eseguiamo train.py come subprocess, in modo che non blocchi
-        # la GUI (e che non vada in segfault per via dei threads).
+        # train.py come subprocess per non bloccare la GUI (ed evitare segfault con i thread)
         proc = subprocess.Popen(
             [sys.executable, "train.py"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -677,17 +637,15 @@ class MusicRecommenderApp(ctk.CTk):
             text=True,
         )
 
-        # Aspettiamo che termini, polling non bloccante
         self._poll_retrain(proc)
 
     def _poll_retrain(self, proc):
-        """Polling del subprocess di training, senza bloccare la GUI."""
+        # polling del subprocess di training, senza bloccare la GUI
         ret = proc.poll()
         if ret is None:
-            # Ancora in corso, ricontrolla fra 300ms
+            # ancora in corso, ricontrolla fra 300ms
             self.after(300, lambda: self._poll_retrain(proc))
             return
-        # Terminato
         output, _ = proc.communicate()
         if ret == 0:
             self.status_var.set("Retraining completato. Ricarico il modello...")
